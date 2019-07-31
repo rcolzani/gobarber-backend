@@ -48,6 +48,12 @@ class AppointmentController {
       return res.status(400).json({ error: 'Validation fails' });
     }
     const { provider_id, date } = req.body;
+    /*
+    check if user is not creating appoint to himself
+    */
+    if (req.userId === provider_id) {
+      return res.json({ error: "You can't create appoint to yourself" });
+    }
 
     /* check if provider_id is a provider */
 
