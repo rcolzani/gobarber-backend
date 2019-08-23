@@ -5,6 +5,8 @@ import User from '../models/User';
 import File from '../models/File';
 import Appointment from '../models/Appointment';
 import Notification from '../schemas/Notification';
+import Queue from '../../lib/Queue';
+import CancellationMail from '../jobs/CancellationMail';
 
 class AppointmentController {
   async index(req, res) {
@@ -18,7 +20,7 @@ class AppointmentController {
       order: ['date'],
       limit: 20,
       offset: (page - 1) * 20,
-      attributes: ['id', 'date'],
+      attributes: ['id', 'date', 'past', 'cancelable'],
       include: [
         {
           model: User,
@@ -119,14 +121,27 @@ class AppointmentController {
   }
 
   async delete(req, res) {
-    const appointment = await Appointment.findByPk(req.params.id);
+    const appointment = await Appointment.findByPk(req.params.id, {
+      include: [
+        {
+          model: User,
+          as: 'provider',
+          attributes: ['name', 'email'],
+        },
+        {
+          model: User,
+          as: 'user',
+          attributes: ['name'],
+        },
+      ],
+    });
 
     if (!appointment) {
-      return res.json({ error: "Appoint doesn't exists." });
+      return res.status(401).json({ error: "Appoint doesn't exists." });
     }
 
     if (appointment.user_id !== req.userId) {
-      return res.json({
+      return res.status(401).json({
         error: 'You do not have permission to cancel this appointment.',
       });
     }
@@ -134,7 +149,7 @@ class AppointmentController {
     const hourLimit = subHours(appointment.date, 2);
 
     if (isBefore(hourLimit, new Date())) {
-      return res.json({
+      return res.status(401).json({
         error:
           'You cannot delete. Canceled date is too close to appointment date',
       });
@@ -142,6 +157,10 @@ class AppointmentController {
 
     appointment.canceled_at = new Date();
     await appointment.save();
+
+    await Queue.add(CancellationMail.key, {
+      appointment,
+    });
 
     return res.json(appointment);
   }
